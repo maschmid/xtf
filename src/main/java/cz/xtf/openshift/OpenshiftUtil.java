@@ -49,6 +49,7 @@ import io.fabric8.kubernetes.api.model.Endpoints;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
 import io.fabric8.kubernetes.api.model.HasMetadata;
+import io.fabric8.kubernetes.api.model.HorizontalPodAutoscaler;
 import io.fabric8.kubernetes.api.model.KubernetesList;
 import io.fabric8.kubernetes.api.model.KubernetesListBuilder;
 import io.fabric8.kubernetes.api.model.ObjectReference;
@@ -61,13 +62,12 @@ import io.fabric8.kubernetes.api.model.ResourceQuota;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceAccount;
-import io.fabric8.kubernetes.api.model.extensions.HorizontalPodAutoscaler;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
-import io.fabric8.kubernetes.client.dsl.ClientKubernetesListMixedOperation;
-import io.fabric8.kubernetes.client.dsl.ClientPodResource;
+import io.fabric8.kubernetes.client.dsl.KubernetesListMixedOperation;
 import io.fabric8.kubernetes.client.dsl.LogWatch;
+import io.fabric8.kubernetes.client.dsl.PodResource;
 import io.fabric8.openshift.api.model.Build;
 import io.fabric8.openshift.api.model.BuildConfig;
 import io.fabric8.openshift.api.model.BuildRequest;
@@ -173,6 +173,7 @@ public class OpenshiftUtil implements AutoCloseable {
 	}
 
 	public <R> R withDefaultUser(Function<NamespacedOpenShiftClient, R> f) {
+
 		if (defaultClient == null) {
 
 			final OpenShiftConfigBuilder openShiftConfigBuilder = new OpenShiftConfigBuilder()
@@ -195,7 +196,8 @@ public class OpenshiftUtil implements AutoCloseable {
 		return f.apply(defaultClient);
 	}
 
-	public <R> R withAdminUser(Function<NamespacedOpenShiftClient, R> f) {
+	synchronized public <R> R withAdminUser(Function<NamespacedOpenShiftClient, R> f) {
+
 		if (TestConfiguration.openshiftOnline()) {
 			throw new IllegalArgumentException("Openshift online does not support admin users.");
 		}
@@ -832,7 +834,7 @@ public class OpenshiftUtil implements AutoCloseable {
 	public RoleBinding updateRoleBinding(RoleBinding roleBinding) {
 		return withAdminUser(client -> client.inNamespace(roleBinding.getMetadata().getNamespace())
 				.roleBindings()
-				.replace(roleBinding));
+				.createOrReplace(roleBinding));
 	}
 
 	private void addSubjectToRoleBinding(RoleBinding roleBinding, String entityKind, String entityName) {
@@ -919,27 +921,27 @@ public class OpenshiftUtil implements AutoCloseable {
 		withDefaultUser(client -> client.persistentVolumeClaims().delete(pvc));
 	}
 
-	public ClientKubernetesListMixedOperation getLists() {
+	public KubernetesListMixedOperation getLists() {
 		return withDefaultUser(client -> client.lists());
 	}
 
 	// Horizontal pod autoscalers
 	public HorizontalPodAutoscaler createHorizontalPodAutoscaler(
 			final HorizontalPodAutoscaler hpa) {
-		return withDefaultUser(client -> client.extensions().horizontalPodAutoscalers()
+		return withDefaultUser(client -> client.autoscaling().horizontalPodAutoscalers()
 				.create(hpa));
 	}
 
 	public Collection<HorizontalPodAutoscaler> getHorizontalPodAutoscalers() {
-		return withDefaultUser(client -> client.extensions().horizontalPodAutoscalers().list().getItems());
+		return withDefaultUser(client -> client.autoscaling().horizontalPodAutoscalers().list().getItems());
 	}
 
 	public HorizontalPodAutoscaler getHorizontalPodAutoscaler(final String name) {
-		return withDefaultUser(client -> client.extensions().horizontalPodAutoscalers().withName(name).get());
+		return withDefaultUser(client -> client.autoscaling().horizontalPodAutoscalers().withName(name).get());
 	}
 
 	public void deleteHorizontalPodAutoscaler(final HorizontalPodAutoscaler hpa) {
-		withDefaultUser(client -> client.extensions().horizontalPodAutoscalers().delete(hpa));
+		withDefaultUser(client -> client.autoscaling().horizontalPodAutoscalers().delete(hpa));
 	}
 
 	// ConfigMaps
@@ -1139,7 +1141,7 @@ public class OpenshiftUtil implements AutoCloseable {
 				.getLog());
 	}
 
-	private ClientPodResource<Pod, DoneablePod> withDefaultUserPod(Pod pod) {
+	private PodResource<Pod, DoneablePod> withDefaultUserPod(Pod pod) {
 		if (pod.getMetadata().getNamespace() != null) {
 			return withDefaultUser(c -> c.pods().inNamespace(pod.getMetadata().getNamespace()).withName(pod.getMetadata().getName()));
 		}
@@ -1245,7 +1247,6 @@ public class OpenshiftUtil implements AutoCloseable {
 		getServices().forEach(this::deleteService);
 		getBuilds().forEach(this::deleteBuild);
 		getRoutes().forEach(this::deleteRoute);
-		getPods().forEach(pod -> deletePod(pod, 0L));
 		getPersistentVolumeClaims().forEach(this::deletePersistentVolumeClaim);
 		getHorizontalPodAutoscalers().forEach(this::deleteHorizontalPodAutoscaler);
 		getConfigMaps().forEach(this::deleteConfigMap);

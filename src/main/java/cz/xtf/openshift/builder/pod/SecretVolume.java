@@ -15,6 +15,7 @@ public class SecretVolume extends Volume {
 		this.items = null;
 	}
 
+	// TODO: set mode optionally
 	public SecretVolume(String name, String secretName, Map<String, String> items) {
 		super(name);
 		this.secretName = secretName;
@@ -32,7 +33,11 @@ public class SecretVolume extends Volume {
 				.withSecretName(getSecretName());
 
 		if (items != null) {
-			items.forEach(volumeBuilderSecretNested::addNewItem);
+			items.forEach((key, path) -> {
+				volumeBuilderSecretNested.addNewItem()
+						.withKey(key)
+						.withPath(path);
+			});
 		}
 
 		volumeBuilderSecretNested.endSecret();
